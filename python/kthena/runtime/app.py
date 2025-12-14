@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
         state.redis_client = redis_client
         logger.info("Redis client initialized successfully")
     except Exception as e:
-        logger.warning(f"Failed to initialize Redis client: {e}")
+        logger.warning("Failed to initialize Redis client:%s",e)
         state.redis_client = None
 
     try:
@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
         logger.info("Event publisher started successfully")
 
     except Exception as e:
-        logger.error(f"Failed to initialize event system: {e}")
+        logger.error("Failed to initialize event system: %s",e )
         state.event_publisher = None
 
     state.vllm_zmq_subscriber = None
@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
             state.vllm_zmq_subscriber = vllm_zmq_subscriber
             logger.info("vLLM ZMQ subscriber initialized successfully")
         except Exception as e:
-            logger.warning(f"Failed to initialize vLLM ZMQ subscriber: {e}")
+            logger.warning("Failed to initialize vLLM ZMQ subscriber: %s", e)
 
     yield
 
@@ -187,13 +187,13 @@ async def get_metrics(request: Request) -> Response:
         )
 
     except httpx.HTTPError as e:
-        logger.error(f"Failed to fetch metrics: {e}")
+        logger.error("Failed to fetch metrics: %s",e)
         raise HTTPException(
             status_code=502,
             detail=f"Failed to fetch metrics from engine: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"Error processing metrics: {e}")
+        logger.error("Error processing metrics: %s",e)
         raise HTTPException(
             status_code=500,
             detail=f"Error processing metrics: {str(e)}"
@@ -212,11 +212,11 @@ def create_application(args: argparse.Namespace) -> FastAPI:
 
     app.include_router(router)
 
-    logger.info(f"Application configured for engine: {args.engine}")
-    logger.info(f"Engine base URL: {args.engine_base_url}")
-    logger.info(f"Engine metrics URL: {args.engine_base_url + args.engine_metrics_path}")
-    logger.info(f"Pod: {args.pod}")
-    logger.info(f"Model: {args.model}")
+    logger.info("Application configured for engine: %s", args.engine)
+    logger.info("Engine base URL: %s", args.engine_base_url)
+    logger.info("Engine metrics URL: %s%s", args.engine_base_url, args.engine_metrics_path)
+    logger.info("Pod: %s", args.pod)
+    logger.info("Model: %s", args.model)
 
     return app
 
@@ -284,7 +284,7 @@ def main() -> None:
         args = parse_arguments()
         app = create_application(args)
 
-        logger.info(f"Starting service on {args.host}:{args.port}")
+        logger.info("Starting service on %s:%s", args.host, args.port)
 
         uvicorn.run(
             app,
@@ -296,7 +296,7 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Service stopped by user")
     except Exception as e:
-        logger.error(f"Failed to start service: {e}")
+        logger.error("Failed to start service: %s",e)
         raise
 
 
@@ -329,7 +329,7 @@ async def load_lora_adapter(request: Request, background_tasks: BackgroundTasks)
             try:
                 logger.info(f"Downloading LoRA adapter from {source} to {output_dir}")
                 download_model(source, output_dir, config, max_workers)
-                logger.info(f"LoRA adapter download completed: {source} -> {output_dir}")
+                logger.info("LoRA adapter download completed: %s -> %s", source, output_dir)
 
                 # Load the adapter
                 load_body = {
@@ -348,7 +348,7 @@ async def load_lora_adapter(request: Request, background_tasks: BackgroundTasks)
                     return response.json()
 
             except Exception as e:
-                logger.error(f"Error in download and load task: {e}")
+                logger.error("Error in download and load task: %s",e)
                 raise
 
         if async_download:
