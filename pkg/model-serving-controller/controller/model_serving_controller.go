@@ -386,6 +386,7 @@ func (c *ModelServingController) syncModelServing(ctx context.Context, key strin
 	if err != nil {
 		return err
 	}
+
 	// only fields in roles can be modified in rolling updates.
 	// and only modifying the role.replicas field will not affect the revision.
 	copy := utils.RemoveRoleReplicasForRevision(mi)
@@ -467,7 +468,7 @@ func (c *ModelServingController) manageServingGroupReplicas(ctx context.Context,
 	if curReplicas < expectedCount {
 		// update pod groups if needed
 		for _, servingGroup := range servingGroupList {
-			if err := c.gangManager.UpdatePodGroup(ctx, mi, servingGroup.Name); err != nil {
+			if err := c.gangManager.CreateOrUpdatePodGroup(ctx, mi, servingGroup.Name); err != nil {
 				klog.Errorf("failed to update PodGroup for ServingGroup %s: %v", servingGroup.Name, err)
 			}
 		}
@@ -488,7 +489,7 @@ func (c *ModelServingController) manageServingGroupReplicas(ctx context.Context,
 		}
 		for _, servingGroup := range servingGroupList {
 			if servingGroup.Status != datastore.ServingGroupDeleting {
-				if err := c.gangManager.UpdatePodGroup(ctx, mi, servingGroup.Name); err != nil {
+				if err := c.gangManager.CreateOrUpdatePodGroup(ctx, mi, servingGroup.Name); err != nil {
 					klog.Errorf("failed to update PodGroup for ServingGroup %s: %v", servingGroup.Name, err)
 				}
 			}
@@ -514,7 +515,7 @@ func (c *ModelServingController) scaleUpServingGroups(ctx context.Context, mi *w
 		newIndex := startingIndex + i
 		groupName := utils.GenerateServingGroupName(mi.Name, newIndex)
 		// Ensure a PodGroup exists for the new ServingGroup when gang scheduling is enabled.
-		if err := c.gangManager.EnsurePodGroup(ctx, mi, groupName); err != nil {
+		if err := c.gangManager.CreateOrUpdatePodGroup(ctx, mi, groupName); err != nil {
 			return err
 		}
 

@@ -18,7 +18,6 @@ package gangscheduling
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 
@@ -55,48 +54,23 @@ func NewManager(kubeClient kubernetes.Interface, volcanoClient volcanoclient.Int
 	}
 }
 
-// ManagePodGroups manages PodGroups for a ModelServing instance
-func (m *Manager) ManagePodGroups(ctx context.Context, mi *workloadv1alpha1.ModelServing) error {
-	if m.shouldCreatePodGroup(mi) {
-		return m.managePodGroups(ctx, mi)
-	}
-	return nil
-}
-
-// EnsurePodGroup ensures a PodGroup exists for the given ServingGroup name.
-// It is a thin wrapper over the internal managePodGroups logic and is intended
-// for callers that operate at ServingGroup granularity.
-func (m *Manager) EnsurePodGroup(ctx context.Context, mi *workloadv1alpha1.ModelServing, servingGroupName string) error {
+// CreateOrUpdatePodGroup creates a PodGroup for the given ServingGroup if it doesn't exist,
+// or updates it if it does.
+func (m *Manager) CreateOrUpdatePodGroup(ctx context.Context, mi *workloadv1alpha1.ModelServing, pgName string) error {
 	if !m.shouldCreatePodGroup(mi) {
 		return nil
 	}
 
-	// Create a new PodGroup for this ServingGroup.
-	if err := m.createPodGroup(ctx, mi, servingGroupName); err != nil {
-		return fmt.Errorf("failed to create PodGroup %s: %v", servingGroupName, err)
-	}
-	return nil
-}
-
-// UpdatePodGroup updates the PodGroup for the given ServingGroup if needed
-// based on current roles and gang/network topology settings.
-func (m *Manager) UpdatePodGroup(ctx context.Context, mi *workloadv1alpha1.ModelServing, servingGroupName string) error {
-	if !m.shouldCreatePodGroup(mi) {
-		return nil
-	}
-
-	existing, err := m.getExistingPodGroups(ctx, mi)
+	podGroup, err := m.volcanoClient.SchedulingV1beta1().PodGroups(mi.Namespace).Get(ctx, pgName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get existing PodGroups: %v", err)
-	}
-
-	pg, ok := existing[servingGroupName]
-	if !ok {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get PodGroup %s: %v", pgName, err)
+		}
 		// PodGroup not found; caller may not have created it yet. Best-effort create.
-		return m.createPodGroup(ctx, mi, servingGroupName)
+		return m.createPodGroup(ctx, mi, pgName)
 	}
 
-	return m.updatePodGroupIfNeeded(ctx, pg, mi)
+	return m.updatePodGroupIfNeeded(ctx, podGroup, mi)
 }
 
 // shouldCreatePodGroup checks if gang scheduling or networkTopology scheduling is enabled for the ModelServing.
@@ -109,40 +83,6 @@ func (m *Manager) shouldCreatePodGroup(mi *workloadv1alpha1.ModelServing) bool {
 	hasGangOrTopology := mi.Spec.Template.GangPolicy != nil || mi.Spec.Template.NetworkTopology != nil
 
 	return isVolcano && hasGangOrTopology
-}
-
-// managePodGroups manages PodGroups for group-level gang scheduling
-func (m *Manager) managePodGroups(ctx context.Context, mi *workloadv1alpha1.ModelServing) error {
-	expectedReplicas := int(*mi.Spec.Replicas)
-
-	// Get existing PodGroups
-	existingPodGroups, err := m.getExistingPodGroups(ctx, mi)
-	if err != nil {
-		return fmt.Errorf("failed to get existing PodGroups: %v", err)
-	}
-
-	servingGroupList, err := m.store.GetServingGroupByModelServing(utils.GetNamespaceName(mi))
-	if err != nil && !errors.Is(err, datastore.ErrServingGroupNotFound) {
-		return fmt.Errorf("failed to get ServingGroups for ModelServing %s: %v", utils.GetNamespaceName(mi), err)
-	}
-
-	neededHandledPodGroupNameList := neededHandledPodGroupNameList(expectedReplicas, mi, servingGroupList)
-	// Create or update PodGroups for each ServingGroup
-	for _, podGroupName := range neededHandledPodGroupNameList {
-		if existingPG, exists := existingPodGroups[podGroupName]; exists {
-			// Update existing PodGroup if needed
-			if err := m.updatePodGroupIfNeeded(ctx, existingPG, mi); err != nil {
-				return fmt.Errorf("failed to update PodGroup %s: %v", podGroupName, err)
-			}
-		} else {
-			// Create new PodGroup
-			if err := m.createPodGroup(ctx, mi, podGroupName); err != nil {
-				return fmt.Errorf("failed to create PodGroup %s: %v", podGroupName, err)
-			}
-		}
-	}
-
-	return nil
 }
 
 // createPodGroup creates a PodGroup for group-level gang scheduling
@@ -174,6 +114,7 @@ func (m *Manager) createPodGroup(ctx context.Context, mi *workloadv1alpha1.Model
 
 	_, err := m.volcanoClient.SchedulingV1beta1().PodGroups(mi.Namespace).Create(ctx, podGroup, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
+		fmt.Printf("failed to create PodGroup %s: %v\n", podGroup.Name, err)
 		return err
 	}
 
@@ -307,6 +248,7 @@ func (m *Manager) updatePodGroupIfNeeded(ctx context.Context, existing *scheduli
 	if hasPodGroupChanged(existing, updated) {
 		_, err := m.volcanoClient.SchedulingV1beta1().PodGroups(mi.Namespace).Update(ctx, updated, metav1.UpdateOptions{})
 		if err != nil {
+			fmt.Printf("failed to update PodGroup %s: %v\n", existing.Name, err)
 			return err
 		}
 		klog.V(2).Infof("Updated PodGroup %s for group-level gang scheduling", existing.Name)
