@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,6 +53,7 @@ func main() {
 	var enableWebhook bool
 	var wc webhookConfig
 	var cc controller.Config
+	var controllers string
 	// Initialize klog flags
 	klog.InitFlags(nil)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
@@ -67,7 +69,19 @@ func main() {
 	pflag.BoolVar(&cc.EnableLeaderElection, "leader-elect", false, "Enable leader election for controller. "+
 		"Enabling this will ensure there is only one active controller. Default is false.")
 	pflag.IntVar(&cc.Workers, "workers", 5, "number of workers to run. Default is 5")
+	pflag.StringVar(&controllers, "controllers", "", "Comma-separated list of controllers to enable. Available: modelserving,modelbooster,autoscaler. "+
+		"If empty, all controllers are enabled.")
+
 	pflag.Parse()
+
+	if controllers != "" {
+		controllerList := strings.Split(controllers, ",")
+		for i, ctrl := range controllerList {
+			controllerList[i] = strings.TrimSpace(ctrl)
+		}
+		cc.Controllers = controllerList
+	}
+
 	pflag.CommandLine.VisitAll(func(f *pflag.Flag) {
 		klog.Infof("Flag: %s, Value: %s", f.Name, f.Value.String())
 	})

@@ -42,9 +42,18 @@ const (
 	defaultRetryPeriod   = 2 * time.Second
 	leaderElectionId     = "kthena.controller-manager"
 	leaseName            = "lease.kthena.controller-manager"
+
+	ModelServingController = "modelserving"
+	ModelBoosterController = "modelbooster"
+	AutoscalerController   = "autoscaler"
 )
 
 func SetupController(ctx context.Context, cc Config) {
+	if !cc.shouldEnableAnyController() {
+		klog.Info("No controllers enabled, exiting")
+		return
+	}
+
 	config, err := clientcmd.BuildConfigFromFlags(cc.MasterURL, cc.Kubeconfig)
 	if err != nil {
 		klog.Fatalf("build client config: %v", err)
@@ -55,21 +64,57 @@ func SetupController(ctx context.Context, cc Config) {
 	if err != nil {
 		klog.Fatalf("failed to create volcano client: %v", err)
 	}
-	mc := modelbooster.NewModelBoosterController(kubeClient, client)
-	msc, err := modelserving.NewModelServingController(kubeClient, client, volcanoClient)
-	if err != nil {
-		klog.Fatalf("failed to create ModelServing controller: %v", err)
+
+	var mc *modelbooster.ModelBoosterController
+	var msc *modelserving.ModelServingController
+	var ac *autoscaler.AutoscaleController
+
+	if cc.shouldEnableController(ModelBoosterController) {
+		mc = modelbooster.NewModelBoosterController(kubeClient, client)
+		klog.Info("ModelBooster controller will be started")
+	} else {
+		klog.Info("ModelBooster controller is disabled")
 	}
-	namespace, err := utils.GetInClusterNameSpace()
-	if err != nil {
-		klog.Fatalf("create Autoscaler client: %v", err)
+
+	if cc.shouldEnableController(ModelServingController) {
+		msc, err = modelserving.NewModelServingController(kubeClient, client, volcanoClient)
+		if err != nil {
+			klog.Fatalf("failed to create ModelServing controller: %v", err)
+		}
+		klog.Info("ModelServing controller will be started")
+	} else {
+		klog.Info("ModelServing controller is disabled")
 	}
-	ac := autoscaler.NewAutoscaleController(kubeClient, client, namespace)
+
+	if cc.shouldEnableController(AutoscalerController) {
+		namespace, err := utils.GetInClusterNameSpace()
+		if err != nil {
+			klog.Fatalf("create Autoscaler client: %v", err)
+		}
+		ac = autoscaler.NewAutoscaleController(kubeClient, client, namespace)
+		klog.Info("Autoscaler controller will be started")
+	} else {
+		klog.Info("Autoscaler controller is disabled")
+	}
+
+	startControllers := func(ctx context.Context) {
+		if mc != nil {
+			go mc.Run(ctx, cc.Workers)
+			klog.Info("ModelBooster controller started")
+		}
+		if msc != nil {
+			go msc.Run(ctx, cc.Workers)
+			klog.Info("ModelServing controller started")
+		}
+		if ac != nil {
+			go ac.Run(ctx)
+			klog.Info("Autoscaler controller started")
+		}
+	}
+
 	if cc.EnableLeaderElection {
 		startedLeading := func(ctx context.Context) {
-			go mc.Run(ctx, cc.Workers)
-			go msc.Run(ctx, cc.Workers)
-			go ac.Run(ctx)
+			startControllers(ctx)
 			klog.Info("Start as leader")
 		}
 		leaderElector, err := initLeaderElector(kubeClient, startedLeading)
@@ -78,10 +123,8 @@ func SetupController(ctx context.Context, cc Config) {
 		}
 		leaderElector.Run(ctx)
 	} else {
-		go mc.Run(ctx, cc.Workers)
-		go msc.Run(ctx, cc.Workers)
-		go ac.Run(ctx)
-		klog.Info("Started controller without leader election")
+		startControllers(ctx)
+		klog.Info("Started controllers without leader election")
 	}
 	<-ctx.Done()
 }
