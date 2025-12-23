@@ -1,74 +1,94 @@
 workload:
-  # enabled is a flag to enable or disable the workload subchart. Default is true.
+  # -- Enable the workload subchart.
   enabled: true
   controllerManager:
     image:
+      # -- Image repository for the Controller Manager.
       repository: ghcr.io/volcano-sh/kthena-controller-manager
+      # -- Image tag for the Controller Manager.
       tag: latest
+      # -- Image pull policy for the Controller Manager.
       pullPolicy: IfNotPresent
     downloaderImage:
+      # -- Image repository for the Downloader.
       repository: ghcr.io/volcano-sh/downloader
+      # -- Image tag for the Downloader.
       tag: latest
     runtimeImage:
+      # -- Image repository for the Runtime.
       repository: ghcr.io/volcano-sh/runtime
+      # -- Image tag for the Runtime.
       tag: latest
     webhook:
+      # -- Enable webhook for the Controller Manager.
       enabled: true
       tls:
+        # -- Secret name for storing webhook certificates.
         certSecretName: kthena-controller-manager-webhook-certs
+        # -- Service name for the webhook.
         serviceName: kthena-controller-manager-webhook
 
 networking:
-  # enabled is a flag to enable or disable the networking subchart. Default is true.
+  # -- Enable the networking subchart.
   enabled: true
   kthenaRouter:
+    # -- Enable Kthena Router.
     enabled: true
+    # -- Container port for Kthena Router.
     port: 8080
     image:
+      # -- Image repository for Kthena Router.
       repository: ghcr.io/volcano-sh/kthena-router
+      # -- Image tag for Kthena Router.
       tag: latest
+      # -- Image pull policy for Kthena Router.
       pullPolicy: IfNotPresent
     tls:
+      # -- Enable TLS for Kthena Router server.
       enabled: false
-      # The DNS name to use for the certificate.
+      # -- DNS name to use for the certificate.
       dnsName: "your-domain.com"
-      # The name of the secret to store the certificate and key.
+      # -- Secret name to store the certificate and key.
       secretName: "kthena-router-tls"
     webhook:
+      # -- Enable webhook for Kthena Router.
       enabled: true
+      # -- Container port for Kthena Router webhook.
       port: 8443
+      # -- Service port for Kthena Router webhook.
       servicePort: 443
       tls:
+        # -- Certificate file path for the webhook.
         certFile: /etc/tls/tls.crt
+        # -- Key file path for the webhook.
         keyFile: /etc/tls/tls.key
+        # -- Secret name for storing webhook certificates.
         secretName: kthena-router-webhook-certs
-    # fairness configuration for request scheduling
     fairness:
-      # enabled controls whether fairness scheduling is active
+      # -- Enable fairness scheduling.
       enabled: false
-      # windowSize is the sliding window duration for token usage tracking
+      # -- Sliding window duration for token usage tracking.
       windowSize: "1h"
-      # inputTokenWeight is the weight multiplier for input tokens
+      # -- Weight multiplier for input tokens.
       inputTokenWeight: 1.0
-      # outputTokenWeight is the weight multiplier for output tokens
+      # -- Weight multiplier for output tokens.
       outputTokenWeight: 2.0
-    # gatewayAPI configuration
     gatewayAPI:
-      # enabled controls whether Gateway API related features are enabled
+      # -- Enable Gateway API related features.
       enabled: false
-      # inferenceExtension controls whether Gateway API Inference Extension features are enabled
-      # This requires gatewayAPI.enabled to be true
+      # -- Enable Gateway API Inference Extension features.<br/>
+      # Requires `gatewayAPI.enabled` to be true.
       inferenceExtension: false
 
 global:
-  # Certificate Management Mode
-  # Three mutually exclusive options for managing TLS certificates:
-  #   - auto: Webhook servers generate self-signed certificates automatically (default)
-  #   - cert-manager: Use cert-manager to generate and manage certificates (requires cert-manager installation)
-  #   - manual: Provide your own certificates via caBundle
+  # -- Certificate Management Mode.<br/>
+  #  Three mutually exclusive options for managing TLS certificates:<br/>
+  #  - `auto`: Webhook servers generate self-signed certificates automatically.<br/>
+  #  - `cert-manager`: Use cert-manager to generate and manage certificates (requires cert-manager installation).<br/>
+  #  - `manual`: Provide your own certificates via caBundle.
   certManagementMode: auto
   webhook:
-    # caBundle is the base64-encoded CA bundle for webhook server certificates.
-    # This is ONLY required when certManagementMode is set to "manual".
-    # You can generate it with: cat /path/to/your/ca.crt | base64 | tr -d '\n'
+    # -- CA bundle for webhook server certificates (base64-encoded).<br/>
+    # This is ONLY required when `certManagementMode` is set to "manual".<br/>
+    # You can generate it with: `cat /path/to/your/ca.crt | base64 | tr -d '\n'`<br/>
     caBundle: ""

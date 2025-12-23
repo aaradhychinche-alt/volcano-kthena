@@ -50,7 +50,7 @@ gen-crd: controller-gen
 	$(CONTROLLER_GEN) crd paths="./pkg/apis/workload/..." output:crd:artifacts:config=charts/kthena/charts/workload/crds
 
 .PHONY: gen-docs
-gen-docs: crd-ref-docs ## Generate CRD and CLI reference documentation
+gen-docs: crd-ref-docs helm-docs ## Generate CRD and CLI reference documentation
     # Generate CRD ref docs
 	mkdir -p docs/kthena/docs/api
 	$(CRD_REF_DOCS) \
@@ -61,6 +61,12 @@ gen-docs: crd-ref-docs ## Generate CRD and CLI reference documentation
 		--output-mode=group
 	# Generate Kthena CLI docs using a standalone doc-gen program
 	go run ./cli/kthena/internal/tools/docgen/main.go
+	# Generate Helm Chart docs
+	$(HELM_DOCS) \
+		--chart-search-root=charts/kthena \
+		--template-files=charts/kthena/README.md.gotmpl \
+		--dry-run \
+		> docs/kthena/docs/reference/helm-chart-values.md
 
 .PHONY: generate
 generate: gen-crd ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -186,11 +192,13 @@ $(LOCALBIN):
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 CRD_REF_DOCS ?= $(LOCALBIN)/crd-ref-docs
+HELM_DOCS ?= $(LOCALBIN)/helm-docs
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.17.2
 GOLANGCI_LINT_VERSION ?= v1.64.8
 CRD_REF_DOCS_VERSION ?= v0.2.0
+HELM_DOCS_VERSION ?= v1.14.2
 
 
 
@@ -208,6 +216,11 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
 $(CRD_REF_DOCS): $(LOCALBIN)
 	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,$(CRD_REF_DOCS_VERSION))
+
+.PHONY: helm-docs
+helm-docs: $(HELM_DOCS) ## Download helm-docs locally if necessary.
+$(HELM_DOCS): $(LOCALBIN)
+	$(call go-install-tool,$(HELM_DOCS),github.com/norwoodj/helm-docs/cmd/helm-docs,$(HELM_DOCS_VERSION))
 
 .PHONY: gen-copyright
 gen-copyright:

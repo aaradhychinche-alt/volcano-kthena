@@ -11,13 +11,15 @@ This guide will help you install Kthena on your Kubernetes cluster.
 Before installing Kthena, ensure you have the following:
 
 ### Required Prerequisites
--   **Kubernetes cluster** (version 1.20 or later)
--   **kubectl** configured to access your cluster
--   **Helm** (version 3.0 or later)
--   Cluster admin permissions
+
+- **Kubernetes cluster** (version 1.20 or later)
+- **kubectl** configured to access your cluster
+- **Helm** (version 3.0 or later)
+- Cluster admin permissions
 
 ### Optional Prerequisites
--   **[cert-manager](https://cert-manager.io/docs/installation/)** - Required only if using the `cert-manager` certificate management mode (see [Certificate Management](../general/cert-manager.md) for details)
+
+- **[cert-manager](https://cert-manager.io/docs/installation/)** - Required only if using the `cert-manager` certificate management mode (see [Certificate Management](../general/cert-manager.md) for details)
 
 ## Installation Methods
 
@@ -25,49 +27,49 @@ Before installing Kthena, ensure you have the following:
 
 Kthena Helm charts are published to the GitHub Container Registry (GHCR).
 
-1.  **Install Kthena directly from GHCR:**
+1. **Install Kthena directly from GHCR:**
 
-    ```bash
-    helm install kthena oci://ghcr.io/volcano-sh/charts/kthena --version v0.2.0 --namespace kthena-system --create-namespace
-    ```
+   ```bash
+   helm install kthena oci://ghcr.io/volcano-sh/charts/kthena --version v0.2.0 --namespace kthena-system --create-namespace
+   ```
 
 ### Method 2: Manual Installation with GitHub Release Manifests
 
 Kthena provides all necessary components in a single manifest file for easy installation from GitHub Releases.
 
-1.  **Apply the Kthena manifest:**
+1. **Apply the Kthena manifest:**
 
-    ```bash
-    kubectl apply -f https://github.com/volcano-sh/kthena/releases/latest/download/kthena-install.yaml
-    ```
+   ```bash
+   kubectl apply -f https://github.com/volcano-sh/kthena/releases/latest/download/kthena-install.yaml
+   ```
 
-    To install a specific version, replace `latest` with the desired release tag (e.g., `v1.2.3`):
+   To install a specific version, replace `latest` with the desired release tag (e.g., `v1.2.3`):
 
-    ```bash
-    kubectl apply -f https://github.com/volcano-sh/kthena/releases/download/vX.Y.Z/kthena-install.yaml
-    ```
+   ```bash
+   kubectl apply -f https://github.com/volcano-sh/kthena/releases/download/vX.Y.Z/kthena-install.yaml
+   ```
 
 ### Method 3: Helm Installation from GitHub Release Package
 
 You can also download the Helm chart package from [GitHub releases](https://github.com/volcano-sh/kthena/releases) and install it locally.
 
-1.  **Download the Helm chart package:**
+1. **Download the Helm chart package:**
 
-    For the latest version:
-    ```bash
-    curl -L -o kthena.tgz https://github.com/volcano-sh/kthena/releases/latest/download/kthena.tgz
-    ```
+   For the latest version:
+   ```bash
+   curl -L -o kthena.tgz https://github.com/volcano-sh/kthena/releases/latest/download/kthena.tgz
+   ```
 
-    For a specific version (replace `vX.Y.Z` with the desired release tag):
-    ```bash
-    curl -L -o kthena.tgz https://github.com/volcano-sh/kthena/releases/download/vX.Y.Z/kthena.tgz
-    ```
+   For a specific version (replace `vX.Y.Z` with the desired release tag):
+   ```bash
+   curl -L -o kthena.tgz https://github.com/volcano-sh/kthena/releases/download/vX.Y.Z/kthena.tgz
+   ```
 
-2.  **Install from the downloaded package:**
+2. **Install from the downloaded package:**
 
-    ```bash
-    helm install kthena kthena.tgz --namespace kthena-system --create-namespace
-    ```
+   ```bash
+   helm install kthena kthena.tgz --namespace kthena-system --create-namespace
+   ```
 
 ## Configuration Options
 
@@ -85,12 +87,12 @@ helm install kthena oci://ghcr.io/volcano-sh/charts/kthena \
 
 ### Common Configuration Parameters
 
-| Parameter | Description | Default |
-| :------------------ | :---------------------------- | :-------- |
-| `workload.controllerManager.replicas` | Number of controller manager replicas | `1` |
-| `networking.kthenaRouter.replicas` | Number of router replicas | `1` |
-| `networking.kthenaRouter.tls.enabled` | Enable TLS for the router | `false` |
-| `global.certManagementMode` | Certificate management mode (`auto`, `cert-manager`, `manual`) | `auto` |
+| Parameter                             | Description                                                    | Default |
+|:--------------------------------------|:---------------------------------------------------------------|:--------|
+| `workload.controllerManager.replicas` | Number of controller manager replicas                          | `1`     |
+| `networking.kthenaRouter.replicas`    | Number of router replicas                                      | `1`     |
+| `networking.kthenaRouter.tls.enabled` | Enable TLS for the router                                      | `false` |
+| `global.certManagementMode`           | Certificate management mode (`auto`, `cert-manager`, `manual`) | `auto`  |
 
 ### Full Values Reference
 
