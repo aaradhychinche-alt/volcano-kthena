@@ -13,6 +13,7 @@ Kthena provides **three mutually exclusive certificate management modes** contro
 **Important**: Only one mode can be active at a time. These modes are mutually exclusive and controlled by the `global.certManagementMode` setting.
 
 The integration covers:
+
 - **Admission Webhooks**: TLS certificates for registry, workload, and networking webhook servers
 - **Kthena Router**: TLS certificates for external API access
 - **Internal Communication**: Service-to-service encrypted communication
@@ -60,9 +61,9 @@ global:
 1. On startup, the webhook server checks if the certificate secret exists
 2. If the secret exists, it uses the existing certificates
 3. If the secret doesn't exist, it generates:
-   - A self-signed CA certificate
-   - A server certificate signed by the CA
-   - A private key
+    - A self-signed CA certificate
+    - A server certificate signed by the CA
+    - A private key
 4. The certificates are stored in a Kubernetes secret with a fixed name
 5. If multiple pods start simultaneously, the first one creates the secret; others detect the existing secret and use it
 
@@ -74,9 +75,9 @@ The service account needs permissions to create and read secrets:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create", "get", "list", "watch"]
+  - apiGroups: [ "" ]
+    resources: [ "secrets" ]
+    verbs: [ "create", "get", "list", "watch" ]
 ```
 
 ## Mode 2: CertManager Integration (For Production)
@@ -102,6 +103,7 @@ global:
 ```
 
 When enabled, Kthena will automatically create:
+
 - Self-signed `Issuer` resources for each component
 - `Certificate` resources with appropriate DNS names
 - TLS secrets for storing certificates and private keys
@@ -146,6 +148,7 @@ global:
 ```
 
 To generate a CA bundle:
+
 ```bash
 cat /path/to/your/ca.crt | base64 | tr -d '\n'
 ```
@@ -157,68 +160,87 @@ cat /path/to/your/ca.crt | base64 | tr -d '\n'
 When cert-manager integration is enabled, the following resources are created:
 
 ### Issuers
-- `<subchart-name>-webhook-issuer` (per subchart: registry, workload, networking)
-- `<subchart-name>-router-issuer` (for kthena router)
+
+- `kthena-controller-manager-webhook-issuer` (Workload)
+- `kthena-router-webhook-issuer` (Networking)
+- `kthena-router-issuer` (Networking - for Kthena Router)
 
 ### Certificates
-- `<subchart-name>-webhook-cert` (per subchart: registry, workload, networking)
-- `<subchart-name>-router-cert` (for kthena router)
+
+- `kthena-controller-manager-webhook-cert` (Workload)
+- `kthena-router-webhook-cert` (Networking)
+- `kthena-router-cert` (Networking - for Kthena Router)
 
 ### Secrets
-- `<subchart-name>-webhook-certs` (per subchart: registry, workload, networking)
-- `<secretName>` (configurable for kthena router)
+
+- `kthena-controller-manager-webhook-certs` (Workload - default)
+- `kthena-router-webhook-certs` (Networking - default)
+- `kthena-router-tls` (Networking - default for Kthena Router)
 
 ## Troubleshooting
 
 ### Common Issues
 
 #### cert-manager Not Found
+
 ```
 Error: failed to create certificate: cert-manager.io/v1, Kind=Certificate not found
 ```
+
 **Solution**: Install cert-manager in your cluster before enabling the integration.
 
 #### Certificate Not Ready
+
 ```
 Certificate is not ready: certificate request has not been approved
 ```
+
 **Solution**: Check cert-manager logs and ensure the issuer is properly configured:
+
 ```bash
 kubectl describe certificate <certificate-name> -n <namespace>
 kubectl logs -n cert-manager deployment/cert-manager
 ```
 
 #### Webhook Connection Refused
+
 ```
 Error: connection refused when calling webhook
 ```
+
 **Solution**: Verify webhook certificates are properly mounted and the service is accessible:
+
 ```bash
 kubectl get certificates -n <namespace>
 kubectl describe secret <webhook-secret-name> -n <namespace>
 ```
 
 #### DNS Resolution Issues
+
 ```
 Error: certificate validation failed for DNS name
 ```
+
 **Solution**: Ensure DNS names in your configuration are resolvable and match your actual service endpoints.
 
 ### Debugging Commands
 
 Check certificate status:
+
 ```bash
 kubectl get certificates -n <namespace>
 kubectl describe certificate <certificate-name> -n <namespace>
 ```
 
 Verify issuer status:
+
 ```bash
 kubectl get issuers -n <namespace>
 kubectl describe issuer <issuer-name> -n <namespace>
 ```
 
 Check cert-manager logs:
+
 ```bash
 kubectl logs -n cert-manager deployment/cert-manager
 kubectl logs -n cert-manager deployment/cert-manager-webhook
@@ -227,21 +249,22 @@ kubectl logs -n cert-manager deployment/cert-manager-webhook
 ### Getting Help
 
 If you encounter issues not covered here:
+
 1. Check the [cert-manager documentation](https://cert-manager.io/docs/)
 2. Review Kthena logs for certificate-related errors
 3. Consult the [cert-manager troubleshooting guide](https://cert-manager.io/docs/troubleshooting/)
 
 ## Comparison of Certificate Options
 
-| Feature | Auto-Generated | cert-manager | Manual |
-|---------|---------------|--------------|--------|
-| Setup Complexity | Low | Medium | High |
-| External Dependencies | None | cert-manager required | Certificate generation tools |
-| Certificate Rotation | Manual (10-year validity) | Automatic | Manual |
-| Production Ready | Development/Testing | Yes | Yes |
-| Multi-Pod Support | Yes | Yes | Yes |
-| Custom CA Support | No (self-signed) | Yes | Yes |
-| Certificate Monitoring | Basic | Advanced | Manual |
+| Feature                | Auto-Generated            | cert-manager          | Manual                       |
+|------------------------|---------------------------|-----------------------|------------------------------|
+| Setup Complexity       | Low                       | Medium                | High                         |
+| External Dependencies  | None                      | cert-manager required | Certificate generation tools |
+| Certificate Rotation   | Manual (10-year validity) | Automatic             | Manual                       |
+| Production Ready       | Development/Testing       | Yes                   | Yes                          |
+| Multi-Pod Support      | Yes                       | Yes                   | Yes                          |
+| Custom CA Support      | No (self-signed)          | Yes                   | Yes                          |
+| Certificate Monitoring | Basic                     | Advanced              | Manual                       |
 
 ## Choosing the Right Option
 
