@@ -14,7 +14,7 @@ Kthena provides **three mutually exclusive certificate management modes** contro
 
 The integration covers:
 
-- **Admission Webhooks**: TLS certificates for registry, workload, and networking webhook servers
+- **Admission Webhooks**: TLS certificates for workload and networking webhook servers
 - **Kthena Router**: TLS certificates for external API access
 - **Internal Communication**: Service-to-service encrypted communication
 
@@ -128,7 +128,7 @@ networking:
 
 #### Webhook Certificates
 
-Webhook certificates are automatically configured when cert-manager is enabled. Each subchart (registry, workload, networking) creates its own webhook certificates with internal DNS names:
+Webhook certificates are automatically configured when cert-manager is enabled. Each subchart (workload, networking) creates its own webhook certificates with internal DNS names:
 
 - `<subchart-name>-webhook.<namespace>.svc`
 - `<subchart-name>-webhook.<namespace>.svc.cluster.local`
