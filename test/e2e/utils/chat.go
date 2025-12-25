@@ -57,12 +57,21 @@ type ChatCompletionsResponse struct {
 // CheckChatCompletions sends a chat completions request to the router service and verifies the response.
 // It uses the port-forwarded router service at localhost:8080.
 func CheckChatCompletions(t *testing.T, modelName string, messages []ChatMessage) *ChatCompletionsResponse {
-	return CheckChatCompletionsWithURL(t, DefaultRouterURL, modelName, messages)
+	return CheckChatCompletionsWithURLAndHeaders(t, DefaultRouterURL, modelName, messages, nil)
 }
 
 // CheckChatCompletionsWithURL sends a chat completions request to the specified URL and verifies the response.
 // It retries with exponential backoff if the request fails or returns a non-200 status code.
 func CheckChatCompletionsWithURL(t *testing.T, url string, modelName string, messages []ChatMessage) *ChatCompletionsResponse {
+	return CheckChatCompletionsWithURLAndHeaders(t, url, modelName, messages, nil)
+}
+
+// CheckChatCompletionsWithHeaders sends a chat completions request with custom headers to the default router URL.
+func CheckChatCompletionsWithHeaders(t *testing.T, modelName string, messages []ChatMessage, headers map[string]string) *ChatCompletionsResponse {
+	return CheckChatCompletionsWithURLAndHeaders(t, DefaultRouterURL, modelName, messages, headers)
+}
+
+func CheckChatCompletionsWithURLAndHeaders(t *testing.T, url string, modelName string, messages []ChatMessage, headers map[string]string) *ChatCompletionsResponse {
 	requestBody := ChatCompletionsRequest{
 		Model:    modelName,
 		Messages: messages,
@@ -90,6 +99,11 @@ func CheckChatCompletionsWithURL(t *testing.T, url string, modelName string, mes
 		require.NoError(t, err, "Failed to create HTTP request")
 		req.Header.Set("Content-Type", "application/json")
 
+		// Add custom headers if provided
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+
 		resp, err = client.Do(req)
 		if err != nil {
 			if attempt < maxRetries-1 {
@@ -103,7 +117,7 @@ func CheckChatCompletionsWithURL(t *testing.T, url string, modelName string, mes
 
 		// Read response body
 		responseBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close() // Close immediately after reading
+		resp.Body.Close()
 		if err != nil {
 			if attempt < maxRetries-1 {
 				t.Logf("Attempt %d/%d failed to read response: %v, retrying in %v...", attempt+1, maxRetries, err, backoff)
