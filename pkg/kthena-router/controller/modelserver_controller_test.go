@@ -893,6 +893,200 @@ func TestModelServerController_ComprehensiveLifecycleTest(t *testing.T) {
 	assert.NoError(t, err) // This should work fine for pods
 }
 
+// TestModelServerController_SharedPods tests a scenario where:
+// 1. We sync a modelserver (ms1) with corresponding pods
+// 2. These pods also belong to another modelserver (ms2)
+// 3. Then we sync the second modelserver (ms2)
+// 4. Verify that GetPodsByModelServer(ms2) returns all pods correctly
+func TestModelServerController_SharedPods(t *testing.T) {
+	patch := setupMockBackend()
+	defer patch.Reset()
+
+	// Create fake clients
+	kubeClient := kubefake.NewSimpleClientset()
+	kthenaClient := kthenafake.NewSimpleClientset()
+
+	// Create two ModelServers with the same selector (so they match the same pods)
+	ms1 := &aiv1alpha1.ModelServer{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "model1",
+		},
+		Spec: aiv1alpha1.ModelServerSpec{
+			InferenceEngine: aiv1alpha1.VLLM,
+			WorkloadSelector: &aiv1alpha1.WorkloadSelector{
+				MatchLabels: map[string]string{
+					"app": "shared-model",
+				},
+			},
+		},
+	}
+	ms2 := &aiv1alpha1.ModelServer{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "model2",
+		},
+		Spec: aiv1alpha1.ModelServerSpec{
+			InferenceEngine: aiv1alpha1.VLLM,
+			WorkloadSelector: &aiv1alpha1.WorkloadSelector{
+				MatchLabels: map[string]string{
+					"app": "shared-model",
+				},
+			},
+		},
+	}
+
+	// Create pods that match both ModelServers' selectors
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "pod1",
+			Labels: map[string]string{
+				"app": "shared-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+	pod2 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "pod2",
+			Labels: map[string]string{
+				"app": "shared-model",
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	// Add resources to fake clients
+	_, err := kthenaClient.NetworkingV1alpha1().ModelServers("default").Create(
+		context.Background(), ms1, metav1.CreateOptions{})
+	assert.NoError(t, err)
+
+	_, err = kubeClient.CoreV1().Pods("default").Create(
+		context.Background(), pod1, metav1.CreateOptions{})
+	assert.NoError(t, err)
+
+	_, err = kubeClient.CoreV1().Pods("default").Create(
+		context.Background(), pod2, metav1.CreateOptions{})
+	assert.NoError(t, err)
+
+	// Create informer factories
+	kubeInformerFactory := informers.NewSharedInformerFactory(kubeClient, 0)
+	kthenaInformerFactory := informersv1alpha1.NewSharedInformerFactory(kthenaClient, 0)
+
+	// Create store
+	store := datastore.New()
+
+	// Create controller
+	controller := NewModelServerController(
+		kthenaInformerFactory,
+		kubeInformerFactory,
+		store,
+	)
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	kthenaInformerFactory.Start(stop)
+	kubeInformerFactory.Start(stop)
+
+	// Wait for caches to sync
+	if !waitForCacheSync(t, 5*time.Second, controller.modelServerSynced, controller.podSynced) {
+		t.Fatal("Failed to sync caches within timeout")
+	}
+
+	// Wait for objects to be available in cache
+	waitForObjectInCache(t, 2*time.Second, func() bool {
+		_, err := controller.modelServerLister.ModelServers("default").Get("model1")
+		return err == nil
+	})
+
+	waitForObjectInCache(t, 2*time.Second, func() bool {
+		_, err := controller.podLister.Pods("default").Get("pod1")
+		return err == nil
+	})
+
+	waitForObjectInCache(t, 2*time.Second, func() bool {
+		_, err := controller.podLister.Pods("default").Get("pod2")
+		return err == nil
+	})
+
+	ms1Name := utils.GetNamespaceName(ms1)
+	pod1Name := utils.GetNamespaceName(pod1)
+	pod2Name := utils.GetNamespaceName(pod2)
+
+	// Step 1: Sync first modelserver (ms1) using syncModelServerHandler
+	err = controller.syncModelServerHandler("default/model1")
+	assert.NoError(t, err)
+
+	// Step 2: Sync pods using syncPodHandler (this will make pods belong to both ms1 and ms2)
+	err = controller.syncPodHandler("default/pod1")
+	assert.NoError(t, err)
+	err = controller.syncPodHandler("default/pod2")
+	assert.NoError(t, err)
+
+	// Step 3: Add ms2 to fake client and sync it
+	_, err = kthenaClient.NetworkingV1alpha1().ModelServers("default").Create(
+		context.Background(), ms2, metav1.CreateOptions{})
+	assert.NoError(t, err)
+
+	waitForObjectInCache(t, 2*time.Second, func() bool {
+		_, err := controller.modelServerLister.ModelServers("default").Get("model2")
+		return err == nil
+	})
+
+	// Sync second modelserver (ms2) using syncModelServerHandler
+	ms2Name := utils.GetNamespaceName(ms2)
+	err = controller.syncModelServerHandler("default/model2")
+	assert.NoError(t, err)
+
+	// Step 4: Verify GetPodsByModelServer(ms2) returns all pods
+	pods, err := store.GetPodsByModelServer(ms2Name)
+	assert.NoError(t, err)
+	assert.Len(t, pods, 2, "ms2 should have 2 pods")
+
+	// Verify both pods are present
+	podNames := make(map[types.NamespacedName]bool)
+	for _, pod := range pods {
+		podNames[utils.GetNamespaceName(pod.Pod)] = true
+	}
+	assert.True(t, podNames[pod1Name], "pod1 should be returned for ms2")
+	assert.True(t, podNames[pod2Name], "pod2 should be returned for ms2")
+
+	// Verify ms1 also has both pods
+	podsMS1, err := store.GetPodsByModelServer(ms1Name)
+	assert.NoError(t, err)
+	assert.Len(t, podsMS1, 2, "ms1 should also have 2 pods")
+
+	// Verify pods reference both model servers
+	pod1Info := store.GetPodInfo(pod1Name)
+	assert.NotNil(t, pod1Info)
+	assert.True(t, pod1Info.HasModelServer(ms1Name), "pod1 should reference ms1")
+	assert.True(t, pod1Info.HasModelServer(ms2Name), "pod1 should reference ms2")
+
+	pod2Info := store.GetPodInfo(pod2Name)
+	assert.NotNil(t, pod2Info)
+	assert.True(t, pod2Info.HasModelServer(ms1Name), "pod2 should reference ms1")
+	assert.True(t, pod2Info.HasModelServer(ms2Name), "pod2 should reference ms2")
+}
+
 // Helper functions for testing
 
 // waitForCacheSync waits for the informer caches to sync with a timeout

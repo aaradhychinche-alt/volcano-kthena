@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +30,6 @@ import (
 	routercontext "github.com/volcano-sh/kthena/test/e2e/router/context"
 	"github.com/volcano-sh/kthena/test/e2e/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 var (
@@ -209,23 +207,7 @@ func TestModelRoutePrefillDecodeDisaggregation(t *testing.T) {
 	})
 
 	// Wait for ModelServing to be ready
-	t.Log("Waiting for ModelServing to be ready...")
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	err = wait.PollUntilContextTimeout(timeoutCtx, 5*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
-		ms, err := testCtx.KthenaClient.WorkloadV1alpha1().ModelServings(testNamespace).Get(ctx, createdModelServing.Name, metav1.GetOptions{})
-		if err != nil {
-			t.Logf("Error getting ModelServing %s, retrying: %v", createdModelServing.Name, err)
-			return false, err
-		}
-		// Check if all replicas are available
-		expectedReplicas := int32(1)
-		if ms.Spec.Replicas != nil {
-			expectedReplicas = *ms.Spec.Replicas
-		}
-		return ms.Status.AvailableReplicas >= expectedReplicas, nil
-	})
-	require.NoError(t, err, "ModelServing did not become ready")
+	utils.WaitForModelServingReady(t, ctx, testCtx.KthenaClient, testNamespace, createdModelServing.Name)
 
 	// Deploy ModelServer
 	t.Log("Deploying ModelServer for PD disaggregation...")
