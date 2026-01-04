@@ -42,6 +42,10 @@ import (
 	"github.com/volcano-sh/kthena/pkg/model-serving-controller/utils"
 )
 
+const (
+	podGroupCRDName = "podgroups.scheduling.volcano.sh"
+)
+
 // Manager manages PodGroups for gang scheduling
 type Manager struct {
 	kubeClient        kubernetes.Interface
@@ -67,7 +71,7 @@ func NewManager(kubeClient kubernetes.Interface, volcanoClient volcanoclient.Int
 	// init the hasPodGroupCRD and hasSubGroupPolicy values
 	crd, err := apiextClient.ApiextensionsV1().CustomResourceDefinitions().Get(
 		context.TODO(),
-		"podgroups.scheduling.volcano.sh",
+		podGroupCRDName,
 		metav1.GetOptions{},
 	)
 
@@ -96,10 +100,10 @@ func NewManager(kubeClient kubernetes.Interface, volcanoClient volcanoclient.Int
 	// Set up informer to watch for PodGroup CRD changes
 	factory := apiextinformers.NewSharedInformerFactory(apiextClient, 0)
 	crdInformer := factory.Apiextensions().V1().CustomResourceDefinitions().Informer()
-	crdInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, _ = crdInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			crd := obj.(*apiextv1.CustomResourceDefinition)
-			if crd.Name == "podgroups.scheduling.volcano.sh" {
+			if crd.Name == podGroupCRDName {
 				klog.Info("[CRD Added] PodGroup CRD detected")
 				newManager.hasPodGroupCRD.Store(true)
 				if podGroupCRDHasSubGroup(crd) {
@@ -123,7 +127,7 @@ func NewManager(kubeClient kubernetes.Interface, volcanoClient volcanoclient.Int
 				return
 			}
 
-			if newCrd.Name != "podgroups.scheduling.volcano.sh" {
+			if newCrd.Name != podGroupCRDName {
 				return
 			}
 
@@ -139,7 +143,7 @@ func NewManager(kubeClient kubernetes.Interface, volcanoClient volcanoclient.Int
 		},
 		DeleteFunc: func(obj interface{}) {
 			crd := obj.(*apiextv1.CustomResourceDefinition)
-			if crd.Name == "podgroups.scheduling.volcano.sh" {
+			if crd.Name == podGroupCRDName {
 				klog.Info("[CRD Deleted] PodGroup CRD removed")
 				newManager.hasPodGroupCRD.Store(false)
 				newManager.hasSubGroupPolicy.Store(false)

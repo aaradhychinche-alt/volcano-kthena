@@ -21,7 +21,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	testhelper "github.com/volcano-sh/kthena/pkg/model-serving-controller/utils/test"
 	corev1 "k8s.io/api/core/v1"
+	apiextfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -87,21 +89,29 @@ func TestCalculateRequirements(t *testing.T) {
 
 	t.Run("basic calculation", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		mi := createBasicModelServing()
 
 		// servingGroupName is used to find roleList.
 		// It will not affect the calculation of minTaskMember.
-		minMember, minTaskMember, minResources := manager.calculateRequirements(mi, "test-serving-group")
+		minMember, minRoleMember, minTaskMember, minResources := manager.calculateRequirements(mi, "test-serving-group")
 
 		// For 2 prefill roles (each with 1 entry + 3 workers) and 1 decode role (1 entry + 2 workers)
 		// Total pods = (1+3)*2 + (1+2)*1 = 8 + 3 = 11
 		assert.Equal(t, 11, minMember)
 
 		// Check task members
-		expectedTaskMembers := map[string]int32{
+		expectedRoleMembers := map[string]int32{
 			"prefill": 4, // 1 entry + 3 workers
 			"decode":  3, // 1 entry + 2 workers
+		}
+		assert.Equal(t, expectedRoleMembers, minRoleMember)
+
+		expectedTaskMembers := map[string]int32{
+			"prefill-0": 4, // 1 entry + 3 workers
+			"prefill-1": 4, // 1 entry + 3 workers
+			"decode-0":  3, // 1 entry + 2 workers
 		}
 		assert.Equal(t, expectedTaskMembers, minTaskMember)
 
@@ -120,7 +130,8 @@ func TestCalculateRequirements(t *testing.T) {
 
 	t.Run("with MinRoleReplicas constraint", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		mi := createBasicModelServing()
 
 		// Set MinRoleReplicas to limit the number of roles considered
@@ -132,16 +143,22 @@ func TestCalculateRequirements(t *testing.T) {
 
 		// servingGroupName is used to find roleList.
 		// It will not affect the calculation of minTaskMember.
-		minMember, minTaskMember, minResources := manager.calculateRequirements(mi, "test-serving-group")
+		minMember, minRoleMember, minTaskMember, minResources := manager.calculateRequirements(mi, "test-serving-group")
 
 		// For 1 prefill role (1 entry + 3 workers) and 1 decode role (1 entry + 2 workers)
 		// Total pods = (1+3)*1 + (1+2)*1 = 4 + 3 = 7
 		assert.Equal(t, 7, minMember)
 
 		// Check task members - should only include prefill-0 and decode-0
-		expectedTaskMembers := map[string]int32{
+		expectedRoleMembers := map[string]int32{
 			"prefill": 4, // 1 entry + 3 workers
 			"decode":  3, // 1 entry + 2 workers
+		}
+		assert.Equal(t, expectedRoleMembers, minRoleMember)
+
+		expectedTaskMembers := map[string]int32{
+			"prefill-0": 4, // 1 entry + 3 workers
+			"decode-0":  3, // 1 entry + 2 workers
 		}
 		assert.Equal(t, expectedTaskMembers, minTaskMember)
 
@@ -160,13 +177,14 @@ func TestCalculateRequirements(t *testing.T) {
 
 	t.Run("nil MinRoleReplicas", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		mi := createBasicModelServing()
 		mi.Spec.Template.GangPolicy.MinRoleReplicas = nil
 
 		// servingGroupName is used to find roleList.
 		// It will not affect the calculation of minTaskMember.
-		minMember, _, _ := manager.calculateRequirements(mi, "test-serving-group")
+		minMember, _, _, _ := manager.calculateRequirements(mi, "test-serving-group")
 
 		// Should consider all roles without constraint
 		// Same as basic calculation: 11 pods
@@ -175,23 +193,26 @@ func TestCalculateRequirements(t *testing.T) {
 
 	t.Run("empty roles", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		mi := createBasicModelServing()
 		mi.Spec.Template.Roles = []workloadv1alpha1.Role{} // Empty roles
 
 		// servingGroupName is used to find roleList.
 		// It will not affect the calculation of minTaskMember.
-		minMember, minTaskMember, minResources := manager.calculateRequirements(mi, "test-serving-group")
+		minMember, minRoleMember, minTaskMember, minResources := manager.calculateRequirements(mi, "test-serving-group")
 
 		// Should have no requirements
 		assert.Equal(t, 0, minMember)
+		assert.Empty(t, minRoleMember)
 		assert.Empty(t, minTaskMember)
 		assert.Empty(t, minResources)
 	})
 
 	t.Run("role with no worker template", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		mi := createBasicModelServing()
 
 		// Modify one role to have no worker template
@@ -199,23 +220,31 @@ func TestCalculateRequirements(t *testing.T) {
 		mi.Spec.Template.Roles[1].WorkerReplicas = 0
 		// servingGroupName is used to find roleList.
 		// It will not affect the calculation of minTaskMember.
-		minMember, minTaskMember, _ := manager.calculateRequirements(mi, "test-serving-group")
+		minMember, minRoleMember, minTaskMember, _ := manager.calculateRequirements(mi, "test-serving-group")
 
 		// For 2 prefill roles (each with 1 entry + 3 workers) and 1 decode role (1 entry only)
 		// Total pods = (1+3)*2 + (1+0)*1 = 8 + 1 = 9
 		assert.Equal(t, 9, minMember)
 
 		// Check task members
-		expectedTaskMembers := map[string]int32{
+		expectedRoleMembers := map[string]int32{
 			"prefill": 4, // 1 entry + 3 workers
 			"decode":  1, // 1 entry only (no workers)
+		}
+		assert.Equal(t, expectedRoleMembers, minRoleMember)
+
+		expectedTaskMembers := map[string]int32{
+			"prefill-0": 4, // 1 entry + 3 workers
+			"prefill-1": 4, // 1 entry + 3 workers
+			"decode-0":  1, // 1 entry only (no workers)
 		}
 		assert.Equal(t, expectedTaskMembers, minTaskMember)
 	})
 
 	t.Run("zero worker replicas", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		mi := createBasicModelServing()
 
 		// Set worker replicas to zero for one role
@@ -223,16 +252,23 @@ func TestCalculateRequirements(t *testing.T) {
 
 		// servingGroupName is used to find roleList.
 		// It will not affect the calculation of minTaskMember.
-		minMember, minTaskMember, _ := manager.calculateRequirements(mi, "test-serving-group")
+		minMember, minRoleMember, minTaskMember, _ := manager.calculateRequirements(mi, "test-serving-group")
 
 		// For 2 prefill roles (each with 1 entry + 0 workers) and 1 decode role (1 entry + 2 workers)
 		// Total pods = (1+0)*2 + (1+2)*1 = 2 + 3 = 5
 		assert.Equal(t, 5, minMember)
 
 		// Check task members
-		expectedTaskMembers := map[string]int32{
+		expectedRoleMembers := map[string]int32{
 			"prefill": 1, // 1 entry only (no workers)
 			"decode":  3, // 1 entry + 2 workers
+		}
+		assert.Equal(t, expectedRoleMembers, minRoleMember)
+
+		expectedTaskMembers := map[string]int32{
+			"prefill-0": 1, // 1 entry only (no workers)
+			"prefill-1": 1, // 1 entry only (no workers)
+			"decode-0":  3, // 1 entry + 2 workers
 		}
 		assert.Equal(t, expectedTaskMembers, minTaskMember)
 	})
@@ -241,7 +277,8 @@ func TestCalculateRequirements(t *testing.T) {
 func TestAggregateResources(t *testing.T) {
 	t.Run("basic aggregation", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{}
 
 		podSpec := &corev1.PodSpec{
@@ -278,7 +315,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("nil total resource list", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		var total corev1.ResourceList = nil
 
 		podSpec := &corev1.PodSpec{
@@ -303,7 +341,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("empty containers", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{}
 
 		podSpec := &corev1.PodSpec{
@@ -317,7 +356,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("nil containers", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{}
 
 		podSpec := &corev1.PodSpec{
@@ -331,7 +371,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("container with no resources", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{}
 
 		podSpec := &corev1.PodSpec{
@@ -350,7 +391,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("container with empty resources", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{}
 
 		podSpec := &corev1.PodSpec{
@@ -371,7 +413,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("multiple calls to aggregate resources", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{}
 
 		podSpec1 := &corev1.PodSpec{
@@ -411,7 +454,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("different resource types", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{}
 
 		podSpec := &corev1.PodSpec{
@@ -439,7 +483,8 @@ func TestAggregateResources(t *testing.T) {
 
 	t.Run("existing resources get updated", func(t *testing.T) {
 		store := datastore.New()
-		manager := NewManager(nil, nil, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, nil, apiextfake, store)
 		total := corev1.ResourceList{
 			corev1.ResourceCPU: resource.MustParse("1"),
 		}
@@ -517,7 +562,8 @@ func TestGetExistingPodGroups(t *testing.T) {
 		// Create fake volcano client with test data
 		fakeVolcanoClient := volcanofake.NewSimpleClientset(podGroup1, podGroup2, podGroup3, podGroupDifferentNamespace)
 		store := datastore.New()
-		manager := NewManager(nil, fakeVolcanoClient, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, fakeVolcanoClient, apiextfake, store)
 
 		result, err := manager.getExistingPodGroups(context.Background(), modelServing)
 
@@ -542,7 +588,8 @@ func TestGetExistingPodGroups(t *testing.T) {
 		// Create fake volcano client with only unrelated pod groups
 		fakeVolcanoClient := volcanofake.NewSimpleClientset(podGroup3)
 		store := datastore.New()
-		manager := NewManager(nil, fakeVolcanoClient, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, fakeVolcanoClient, apiextfake, store)
 
 		result, err := manager.getExistingPodGroups(context.Background(), modelServing)
 
@@ -556,7 +603,8 @@ func TestGetExistingPodGroups(t *testing.T) {
 		// Create fake volcano client with no pod groups
 		fakeVolcanoClient := volcanofake.NewSimpleClientset()
 		store := datastore.New()
-		manager := NewManager(nil, fakeVolcanoClient, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, fakeVolcanoClient, apiextfake, store)
 
 		result, err := manager.getExistingPodGroups(context.Background(), modelServing)
 
@@ -570,7 +618,8 @@ func TestGetExistingPodGroups(t *testing.T) {
 		// Create fake volcano client with pod groups
 		fakeVolcanoClient := volcanofake.NewSimpleClientset(podGroup1, podGroupDifferentNamespace)
 		store := datastore.New()
-		manager := NewManager(nil, fakeVolcanoClient, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, fakeVolcanoClient, apiextfake, store)
 
 		result, err := manager.getExistingPodGroups(context.Background(), modelServing)
 
@@ -585,7 +634,8 @@ func TestGetExistingPodGroups(t *testing.T) {
 	t.Run("nil model Serving parameter", func(t *testing.T) {
 		fakeVolcanoClient := volcanofake.NewSimpleClientset(podGroup1)
 		store := datastore.New()
-		manager := NewManager(nil, fakeVolcanoClient, store)
+		apiextfake := apiextfake.NewSimpleClientset(testhelper.CreatePodGroupCRD())
+		manager := NewManager(nil, fakeVolcanoClient, apiextfake, store)
 
 		// Test with nil ModelServing - this would cause a panic in the real code
 		// but we're checking that our test handles it gracefully
@@ -714,6 +764,80 @@ func TestHasPodGroupChanged(t *testing.T) {
 		result := hasPodGroupChanged(current, updated)
 		assert.False(t, result, "Expected no change when all fields are nil/empty")
 	})
+}
+
+func TestNeedHandledRoleNameList(t *testing.T) {
+	tests := []struct {
+		name             string
+		expectedReplicas int
+		existRoleList    []datastore.Role
+		roleName         string
+		expectedResult   []string
+	}{
+		{
+			name:             "scale up from zero",
+			expectedReplicas: 3,
+			existRoleList:    []datastore.Role{},
+			roleName:         "test-role",
+			expectedResult: []string{
+				utils.GenerateRoleID("test-role", 0),
+				utils.GenerateRoleID("test-role", 1),
+				utils.GenerateRoleID("test-role", 2),
+			},
+		},
+		{
+			name:             "scale up from existing roles",
+			expectedReplicas: 5,
+			existRoleList: []datastore.Role{
+				{Name: utils.GenerateRoleID("test-role", 0)},
+				{Name: utils.GenerateRoleID("test-role", 1)},
+			},
+			roleName: "test-role",
+			expectedResult: []string{
+				utils.GenerateRoleID("test-role", 0),
+				utils.GenerateRoleID("test-role", 1),
+				utils.GenerateRoleID("test-role", 2),
+				utils.GenerateRoleID("test-role", 3),
+				utils.GenerateRoleID("test-role", 4),
+			},
+		},
+		{
+			name:             "scale up with gap in indices",
+			expectedReplicas: 4,
+			existRoleList: []datastore.Role{
+				{Name: utils.GenerateRoleID("test-role", 0)},
+				{Name: utils.GenerateRoleID("test-role", 2)},
+			},
+			roleName: "test-role",
+			expectedResult: []string{
+				utils.GenerateRoleID("test-role", 0),
+				utils.GenerateRoleID("test-role", 2),
+				utils.GenerateRoleID("test-role", 3),
+				utils.GenerateRoleID("test-role", 4),
+			},
+		},
+		{
+			name:             "scale up, exist role index is larger than expectedReplicas",
+			expectedReplicas: 3,
+			existRoleList: []datastore.Role{
+				{Name: utils.GenerateRoleID("test-role", 10)},
+				{Name: utils.GenerateRoleID("test-role", 11)},
+			},
+			roleName: "test-role",
+			expectedResult: []string{
+				utils.GenerateRoleID("test-role", 10),
+				utils.GenerateRoleID("test-role", 11),
+				utils.GenerateRoleID("test-role", 12),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := needHandledRoleNameList(tt.expectedReplicas, tt.existRoleList, tt.roleName)
+			assert.Equal(t, tt.expectedResult, result)
+		})
+	}
 }
 
 func TestNeededHandledPodGroupNameList(t *testing.T) {
