@@ -23,9 +23,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: install sponge
-        shell: bash
-        run: sudo apt-get update && sudo apt-get install -y moreutils
       - name: install helm
         shell: bash
         run: |

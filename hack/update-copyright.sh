@@ -18,6 +18,40 @@ set -eo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 
+ensure_sponge() {
+  if command -v sponge >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "sponge not found; attempting to install moreutils..."
+
+  # Use sudo if available and not already running as root.
+  SUDO=""
+  if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update -y
+    $SUDO apt-get install -y moreutils
+  elif command -v yum >/dev/null 2>&1; then
+    $SUDO yum install -y moreutils
+  elif command -v dnf >/dev/null 2>&1; then
+    $SUDO dnf install -y moreutils
+  else
+    echo "Error: sponge (moreutils) is required but could not be installed automatically." >&2
+    echo "Please install the 'moreutils' package manually." >&2
+    exit 1
+  fi
+
+  if ! command -v sponge >/dev/null 2>&1; then
+    echo "Error: sponge (moreutils) installation appears to have failed." >&2
+    exit 1
+  fi
+}
+
+ensure_sponge
+
 GO_FILES=$(find "$ROOT_DIR" -not -path "/vendor/*" -type f -name '*.go')
 PY_FILES=$(find "$ROOT_DIR" -not -path "/venv/*" -type f -name '*.py')
 
