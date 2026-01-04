@@ -47,6 +47,7 @@ import (
 	listerv1alpha1 "github.com/volcano-sh/kthena/client-go/listers/workload/v1alpha1"
 	workloadv1alpha1 "github.com/volcano-sh/kthena/pkg/apis/workload/v1alpha1"
 	"github.com/volcano-sh/kthena/pkg/model-serving-controller/datastore"
+	"github.com/volcano-sh/kthena/pkg/model-serving-controller/plugins"
 	"github.com/volcano-sh/kthena/pkg/model-serving-controller/podgroupmanager"
 	"github.com/volcano-sh/kthena/pkg/model-serving-controller/utils"
 )
@@ -70,10 +71,11 @@ type ModelServingController struct {
 	modelServingsInformer cache.SharedIndexInformer
 
 	// nolint
-	workqueue   workqueue.RateLimitingInterface
-	store       datastore.Store
-	graceMap    sync.Map // key: errorPod.namespace/errorPod.name, value:time
-	initialSync bool     // indicates whether the initial sync has been completed
+	workqueue       workqueue.RateLimitingInterface
+	store           datastore.Store
+	graceMap        sync.Map // key: errorPod.namespace/errorPod.name, value:time
+	initialSync     bool     // indicates whether the initial sync has been completed
+	pluginsRegistry *plugins.Registry
 }
 
 func NewModelServingController(kubeClientSet kubernetes.Interface, modelServingClient clientset.Interface, volcanoClient volcano.Interface, apiextClient apiextClientSet.Interface) (*ModelServingController, error) {
@@ -111,7 +113,6 @@ func NewModelServingController(kubeClientSet kubernetes.Interface, modelServingC
 	}
 
 	store := datastore.New()
-
 	c := &ModelServingController{
 		kubeClientSet:         kubeClientSet,
 		modelServingClient:    modelServingClient,
@@ -123,8 +124,9 @@ func NewModelServingController(kubeClientSet kubernetes.Interface, modelServingC
 		modelServingLister:    modelServingInformer.Lister(),
 		modelServingsInformer: modelServingInformer.Informer(),
 		// nolint
-		workqueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ModelServings"),
-		store:     store,
+		workqueue:       workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ModelServings"),
+		store:           store,
+		pluginsRegistry: plugins.DefaultRegistry,
 	}
 
 	klog.Info("Set the ModelServing event handler")
@@ -920,6 +922,23 @@ func (c *ModelServingController) manageServingGroupRollingUpdate(ctx context.Con
 }
 
 func (c *ModelServingController) handleReadyPod(ms *workloadv1alpha1.ModelServing, servingGroupName string, newPod *corev1.Pod) error {
+	chain, err := c.buildPluginChain(ms)
+	if err != nil {
+		return fmt.Errorf("build plugin chain: %w", err)
+	}
+	if chain != nil {
+		if err := chain.OnPodReady(context.TODO(), &plugins.HookRequest{
+			ModelServing: ms,
+			ServingGroup: servingGroupName,
+			RoleName:     utils.GetRoleName(newPod),
+			RoleID:       utils.GetRoleID(newPod),
+			IsEntry:      newPod.Labels[workloadv1alpha1.EntryLabelKey] == utils.Entry,
+			Pod:          newPod,
+		}); err != nil {
+			return err
+		}
+	}
+
 	// Add the running pod to the global storage and try to update the ServingGroup status
 	c.store.AddRunningPodToServingGroup(types.NamespacedName{
 		Namespace: ms.Namespace,
@@ -1482,8 +1501,17 @@ func (c *ModelServingController) manageHeadlessService(ctx context.Context, ms *
 			}
 		}
 	}
-
 	return nil
+}
+
+func (c *ModelServingController) buildPluginChain(ms *workloadv1alpha1.ModelServing) (*plugins.Chain, error) {
+	if ms == nil || len(ms.Spec.Plugins) == 0 {
+		return nil, nil
+	}
+	if c.pluginsRegistry == nil {
+		return nil, fmt.Errorf("plugin registry is not initialized")
+	}
+	return plugins.NewChain(c.pluginsRegistry, ms.Spec.Plugins)
 }
 
 func (c *ModelServingController) CreatePodsForServingGroup(ctx context.Context, ms *workloadv1alpha1.ModelServing, servingGroupIndex int, revision string, roles []workloadv1alpha1.Role) error {
@@ -1503,11 +1531,31 @@ func (c *ModelServingController) CreatePodsForServingGroup(ctx context.Context, 
 
 func (c *ModelServingController) CreatePodsByRole(ctx context.Context, role workloadv1alpha1.Role, ms *workloadv1alpha1.ModelServing, roleIndex int, servingGroupOrdinal int, revision string) error {
 	servingGroupName := utils.GenerateServingGroupName(ms.Name, servingGroupOrdinal)
+	// TODO(hzxuzhonghu): build the plugin chain only once per ModelServing
+	// This is not critical now, so we leave it for future optimization.
+	chain, err := c.buildPluginChain(ms)
+	if err != nil {
+		return fmt.Errorf("build plugin chain: %w", err)
+	}
+	roleID := utils.GenerateRoleID(role.Name, roleIndex)
 
 	entryPod := utils.GenerateEntryPod(role, ms, servingGroupName, roleIndex, revision)
 	taskName := c.podGroupManager.GenerateTaskName(role.Name, roleIndex)
 	c.podGroupManager.AnnotatePodWithPodGroup(entryPod, ms, servingGroupName, taskName)
-	_, err := c.kubeClientSet.CoreV1().Pods(ms.Namespace).Create(ctx, entryPod, metav1.CreateOptions{})
+	if chain != nil {
+		entryReq := &plugins.HookRequest{
+			ModelServing: ms,
+			ServingGroup: servingGroupName,
+			RoleName:     role.Name,
+			RoleID:       roleID,
+			IsEntry:      true,
+			Pod:          entryPod,
+		}
+		if err := chain.OnPodCreate(ctx, entryReq); err != nil {
+			return fmt.Errorf("execute OnPodCreate failed for entry pod %s: %v", entryPod.Name, err)
+		}
+	}
+	_, err = c.kubeClientSet.CoreV1().Pods(ms.Namespace).Create(ctx, entryPod, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create entry pod %s: %v", entryPod.Name, err)
 	}
@@ -1515,6 +1563,19 @@ func (c *ModelServingController) CreatePodsByRole(ctx context.Context, role work
 	for i := 1; i <= int(role.WorkerReplicas); i++ {
 		workerPod := utils.GenerateWorkerPod(role, ms, entryPod, servingGroupName, roleIndex, i, revision)
 		c.podGroupManager.AnnotatePodWithPodGroup(workerPod, ms, servingGroupName, taskName)
+		if chain != nil {
+			workerReq := &plugins.HookRequest{
+				ModelServing: ms,
+				ServingGroup: servingGroupName,
+				RoleName:     role.Name,
+				RoleID:       roleID,
+				IsEntry:      false,
+				Pod:          workerPod,
+			}
+			if err := chain.OnPodCreate(ctx, workerReq); err != nil {
+				return fmt.Errorf("execute OnPodCreate failed for worker pod %s: %v", workerPod.Name, err)
+			}
+		}
 		_, err := c.kubeClientSet.CoreV1().Pods(ms.Namespace).Create(ctx, workerPod, metav1.CreateOptions{})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("failed to create worker pod %s: %v", workerPod.Name, err)
