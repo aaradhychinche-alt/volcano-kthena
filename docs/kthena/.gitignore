@@ -22,3 +22,5 @@ yarn-error.log*
 # draw.io
 .$*.drawio.*
 .$*.svg.bkp
+
+.DS_Store
