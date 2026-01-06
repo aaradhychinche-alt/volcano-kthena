@@ -140,7 +140,25 @@ func TestModelCR(t *testing.T) {
 		utils.NewChatMessage("user", "Where is the capital of China?"),
 	}
 	utils.CheckChatCompletions(t, "test-model", messages)
-	// todo: test update modelBooster, delete modelBooster
+	// TODO(user): Add tests for updating and deleting ModelBooster
+}
+
+// TODO(user): Add E2E tests for AutoscalingPolicy lifecycle (Create, Update, Delete and check if it works)
+func TestAutoscalingPolicyLifecycle(t *testing.T) {
+	// Placeholder for AutoscalingPolicy lifecycle tests
+	t.Skip("AutoscalingPolicy lifecycle test is not implemented yet")
+}
+
+// TODO(user): Add E2E tests for ModelServing lifecycle (Create, Update, Delete and check if it works)
+func TestModelServingLifecycle(t *testing.T) {
+	// Placeholder for ModelServing lifecycle tests
+	t.Skip("ModelServing lifecycle test is not implemented yet")
+}
+
+// TODO(user): Add E2E tests for AutoscalingPolicyBinding lifecycle (Create, Update, Delete and check if it works)
+func TestAutoscalingPolicyBindingLifecycle(t *testing.T) {
+	// Placeholder for AutoscalingPolicyBinding lifecycle tests
+	t.Skip("AutoscalingPolicyBinding lifecycle test is not implemented yet")
 }
 
 // TestModelBoosterValidation tests that the webhook rejects invalid ModelBooster specs.
@@ -154,7 +172,6 @@ func TestModelBoosterValidation(t *testing.T) {
 	})
 	require.Error(t, err, "Expected validation error for invalid ModelBooster")
 	// Check that the error is a validation error (admission webhook rejection)
-	// Typically the error message contains "admission webhook" or "validation failed"
 	errorMsg := err.Error()
 	assert.True(t, strings.Contains(errorMsg, "minReplicas cannot be greater than maxReplicas"),
 		"Error should contain specific validation message, got: %v", errorMsg)
