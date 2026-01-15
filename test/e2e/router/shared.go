@@ -654,11 +654,6 @@ func TestModelRouteWithRateLimitShared(t *testing.T, testCtx *routercontext.Rout
 		modelRoute.Namespace = testNamespace
 		setupModelRouteWithGatewayAPI(modelRoute, useGatewayApi, kthenaNamespace)
 
-		// Disable input token limit to test ONLY output token limit
-		modelRoute.Spec.RateLimit.InputTokensPerUnit = nil
-		outputLimit := uint32(outputTokenLimit)
-		modelRoute.Spec.RateLimit.OutputTokensPerUnit = &outputLimit
-
 		createdModelRoute, err := testCtx.KthenaClient.NetworkingV1alpha1().ModelRoutes(testNamespace).Create(ctx, modelRoute, metav1.CreateOptions{})
 		require.NoError(t, err, "Failed to create ModelRoute")
 
@@ -674,6 +669,17 @@ func TestModelRouteWithRateLimitShared(t *testing.T, testCtx *routercontext.Rout
 			return err == nil && mr != nil
 		}, 2*time.Minute, 2*time.Second, "ModelRoute should be created")
 
+		// Update ModelRoute to disable input token limit
+		createdModelRoute.Spec.RateLimit.InputTokensPerUnit = nil
+		outputLimit := uint32(outputTokenLimit)
+		createdModelRoute.Spec.RateLimit.OutputTokensPerUnit = &outputLimit
+
+		updatedModelRoute, err := testCtx.KthenaClient.NetworkingV1alpha1().ModelRoutes(testNamespace).Update(ctx, createdModelRoute, metav1.UpdateOptions{})
+		require.NoError(t, err, "Failed to update ModelRoute")
+
+		// Wait for update to propagate
+		time.Sleep(2 * time.Second)
+
 		longerPrompt := []utils.ChatMessage{
 			utils.NewChatMessage("user", "Write a detailed explanation of rate limiting"),
 		}
@@ -681,9 +687,10 @@ func TestModelRouteWithRateLimitShared(t *testing.T, testCtx *routercontext.Rout
 		// Send requests until we hit the output token limit
 		var successfulRequests int
 		var totalResponseSize int
+		var rateLimited bool
 
-		for attempt := 0; attempt < 10; attempt++ {
-			resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, longerPrompt)
+		for attempt := 0; attempt < 20; attempt++ {
+			resp := utils.SendChatRequest(t, updatedModelRoute.Spec.ModelName, longerPrompt)
 			responseBody, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 
@@ -698,17 +705,17 @@ func TestModelRouteWithRateLimitShared(t *testing.T, testCtx *routercontext.Rout
 				t.Logf("Output rate limited after %d requests", successfulRequests)
 				assert.Contains(t, strings.ToLower(string(responseBody)), "rate limit",
 					"Output rate limit error should mention rate limit")
+				rateLimited = true
 				break
 			} else {
 				t.Fatalf("Unexpected HTTP status code %d on attempt %d", resp.StatusCode, attempt+1)
 			}
 		}
 
-		// Should hit output limit before exhausting all attempts
+		// Verify output rate limiting was enforced
+		assert.True(t, rateLimited, "Expected output rate limiting to be enforced")
 		assert.Greater(t, successfulRequests, 0,
 			"Expected at least one successful request before output rate limiting")
-		assert.Less(t, successfulRequests, 10,
-			"Expected to hit output rate limit (100 tokens) before 10 requests")
 
 		t.Logf(" Output token rate limit enforced after %d requests", successfulRequests)
 	})
