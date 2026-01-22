@@ -644,8 +644,9 @@ func TestModelRouteWithRateLimitShared(t *testing.T, testCtx *routercontext.Rout
 		t.Logf("Waiting %v for complete rate limit window reset...", windowResetDuration)
 		time.Sleep(windowResetDuration)
 
-		// Verify quota is restored after reset (should allow 2 requests again)
-		for i := 0; i < expectedSuccessfulRequests; i++ {
+		// After window reset, full quota is restored (30 tokens = 3 requests)
+		fullQuotaRequests := inputTokenLimit / tokensPerRequest
+		for i := 0; i < fullQuotaRequests; i++ {
 			resp := utils.SendChatRequest(t, createdModelRoute.Spec.ModelName, standardMessage)
 			resp.Body.Close()
 			assert.Equal(t, http.StatusOK, resp.StatusCode,
@@ -658,7 +659,7 @@ func TestModelRouteWithRateLimitShared(t *testing.T, testCtx *routercontext.Rout
 		assert.Equal(t, http.StatusTooManyRequests, postResetRateLimitedResp.StatusCode,
 			"Rate limit should be active again after consuming quota")
 
-		t.Logf("Rate limit reset mechanism verified (quota restored: %d requests)", expectedSuccessfulRequests)
+		t.Logf("Rate limit reset mechanism verified (quota restored: %d requests)", fullQuotaRequests)
 	})
 
 	// Test 4: Verify output token rate limit enforcement
