@@ -286,11 +286,6 @@ func (c *ModelServingController) updatePod(_, newObj interface{}) {
 			klog.Errorf("handle running pod failed: %v", err)
 		}
 	case utils.IsPodFailed(newPod) || utils.ContainerRestarted(newPod):
-		// handleErrorPod is not called until modelServing has been called.
-		if !c.initialSync {
-			return
-		}
-		// Failure occurs in pod and we need to wait for a grace period before making a judgment.
 		err = c.handleErrorPod(ms, servingGroupName, newPod)
 		if err != nil {
 			klog.Errorf("handle error pod failed: %v", err)
@@ -497,23 +492,7 @@ func (c *ModelServingController) syncAll() {
 		klog.Errorf("failed to list pods: %v", err)
 	}
 
-	// Collect failed/restarted pods to process after initial sync is complete.
-	// This fixes a bug where failed pods at startup are silently ignored because
-	// updatePod returns early when initialSync is false for failed pods.
-	var failedPods []*corev1.Pod
 	for _, pod := range pods {
-		if utils.IsPodFailed(pod) || utils.ContainerRestarted(pod) {
-			failedPods = append(failedPods, pod)
-			// Still add the pod to the store for tracking, but defer error handling
-			c.store.AddServingGroupAndRole(
-				types.NamespacedName{Namespace: pod.Namespace, Name: pod.Labels[workloadv1alpha1.ModelServingNameLabelKey]},
-				pod.Labels[workloadv1alpha1.GroupNameLabelKey],
-				utils.PodRevision(pod),
-				utils.GetRoleName(pod),
-				utils.GetRoleID(pod),
-			)
-			continue
-		}
 		c.addPod(pod)
 	}
 
@@ -525,15 +504,7 @@ func (c *ModelServingController) syncAll() {
 		c.addModelServing(ms)
 	}
 
-	// Set initialSync to true BEFORE processing failed pods so handleErrorPod is called
 	c.initialSync = true
-
-	// Now process failed pods that were deferred. With initialSync=true,
-	// updatePod will properly call handleErrorPod for recovery.
-	for _, pod := range failedPods {
-		klog.V(2).Infof("Processing deferred failed pod %s/%s during initial sync", pod.Namespace, pod.Name)
-		c.addPod(pod)
-	}
 }
 
 func (c *ModelServingController) manageServingGroupReplicas(ctx context.Context, ms *workloadv1alpha1.ModelServing, newRevision string) error {

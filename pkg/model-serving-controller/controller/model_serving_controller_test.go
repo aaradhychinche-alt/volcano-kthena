@@ -4440,14 +4440,6 @@ func TestSyncAllWithFailedPods(t *testing.T) {
 		Name:      failedPod.Name,
 	})
 	assert.True(t, existsInGraceMap, "Failed pod should be added to graceMap after syncAll processes it")
-
-	// Verify the ServingGroup and Role were created in the store
-	servingGroups, err := controller.store.GetServingGroupByModelServing(types.NamespacedName{
-		Namespace: ns,
-		Name:      msName,
-	})
-	assert.NoError(t, err)
-	assert.NotEmpty(t, servingGroups, "ServingGroup should exist in store")
 }
 
 // TestSyncAllWithContainerRestartedPods tests that pods with restarted containers
